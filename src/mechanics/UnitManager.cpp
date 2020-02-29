@@ -66,13 +66,14 @@ UnitManager::~UnitManager()
 {
 }
 
-void UnitManager::add(const Unit::Ptr &unit)
+void UnitManager::add(const Unit::Ptr &unit, const MapPos &position)
 {
     if (IS_UNLIKELY(!unit)) {
         WARN << "trying to add null unit";
         return;
     }
     unit->setMap(m_map);
+    unit->setPosition(position, true);
     m_units.push_back(unit);
     if (unit->hasAutoTargets()) {
         m_unitsWithActions.insert(unit);
@@ -227,7 +228,7 @@ void UnitManager::render(const std::shared_ptr<SfmlRenderTarget> &renderTarget, 
         }
 
         if (entity->isUnit()) {
-            Unit::Ptr unit = Entity::asUnit(entity);
+            Unit::Ptr unit = Unit::fromEntity(entity);
 
             if (visibility == VisibilityMap::Visible) {
                 entity->isVisible = true;
@@ -317,8 +318,8 @@ void UnitManager::render(const std::shared_ptr<SfmlRenderTarget> &renderTarget, 
             rect.setFillColor(sf::Color::Transparent);
             rect.setOutlineColor(sf::Color::White);
             rect.setOutlineThickness(1);
-            rect.setSize(unit->rect().size());
-            rect.setPosition(camera->absoluteScreenPos(unit->position()) + unit->rect().topLeft());
+            rect.setSize(unit->clearanceSize());
+            rect.setPosition(camera->absoluteScreenPos(unit->position()));// + unit->rect().topLeft());
             m_outlineOverlay->draw(rect);
 #endif
 
@@ -391,7 +392,7 @@ void UnitManager::render(const std::shared_ptr<SfmlRenderTarget> &renderTarget, 
         unit->renderer().render(*renderTarget->renderTarget_, pos, RenderType::Base);
 
 
-#ifdef DEBUG
+#if defined(DEBUG)
         ActionPtr action = unit->currentAction();
         if (action && action->type == IAction::Type::Move) {
             std::shared_ptr<ActionMove> moveAction = std::static_pointer_cast<ActionMove>(action);
@@ -419,7 +420,7 @@ void UnitManager::render(const std::shared_ptr<SfmlRenderTarget> &renderTarget, 
         renderTarget->renderTarget_->draw(sprite, sf::BlendAdd);
     }
 
-#ifdef DEBUG
+#if defined(DEBUG)
     for (size_t i=0; i<ActionMove::testedPoints.size(); i++) {
         const MapPos &mpos = ActionMove::testedPoints[i];
         sf::CircleShape circle;
@@ -592,16 +593,7 @@ void UnitManager::onRightClick(const ScreenPos &screenPos, const CameraPtr &came
         return;
     }
 
-
-    MapPos mapPos = camera->absoluteMapPos(screenPos);
-	if (mapPos.x < 0)
-		mapPos.x = 0;
-	else if (mapPos.x > Constants::TILE_SIZE * m_map->getRows())
-		mapPos.x = Constants::TILE_SIZE * m_map->getRows();
-	if (mapPos.y < 0)
-		mapPos.y = 0;
-	else if (mapPos.y > Constants::TILE_SIZE * m_map->getCols())
-		mapPos.y = Constants::TILE_SIZE * m_map->getCols();
+    MapPos mapPos = camera->absoluteMapPos(screenPos).clamped(m_map->pixelSize());
 
     bool movedSomeone = false;
     for (const Unit::Ptr &unit : m_selectedUnits) {
@@ -629,10 +621,10 @@ void UnitManager::onMouseMove(const MapPos &mapPos)
 
     if (m_state == State::PlacingWall) {
         MapPos startTile = (m_wallPlacingStart / Constants::TILE_SIZE).rounded();
-        startTile.clamp(Size(m_map->getCols(), m_map->getRows()));
+        startTile.clamp(Size(m_map->columnCount(), m_map->rowCount()));
 
         MapPos endTile = (mapPos / Constants::TILE_SIZE).rounded();
-        endTile.clamp(Size(m_map->getCols(), m_map->getRows()));
+        endTile.clamp(Size(m_map->columnCount(), m_map->rowCount()));
 
         // Is the angle between the start and end less than 0.1 radians away from 45° (aka. M_PI / 4) from any quadrant?
         const bool diagonal = std::abs(std::abs(std::fmod(startTile.angleTo(endTile), M_PI_2)) - M_PI_2 / 2.) < 0.1;
@@ -772,7 +764,7 @@ void UnitManager::selectUnits(const ScreenRect &selectionRect, const CameraPtr &
             continue;
         }
         if (hasHumanPlayer && unit->playerId != humanPlayer->playerId) {
-            continue;
+            //continue;
         }
 
         newSelection.insert(unit);
@@ -990,7 +982,7 @@ void UnitManager::placeBuilding(const UnplacedBuilding &building)
         return;
     }
 
-    Unit::Ptr unit = UnitFactory::Inst().createUnit(building.unitID, building.position, m_humanPlayer.lock(), *this);
+    Unit::Ptr unit = UnitFactory::Inst().createUnit(building.unitID, m_humanPlayer.lock(), *this);
     Building::Ptr buildingToPlace = Unit::asBuilding(unit);
 
     DBG << "placing bulding";
@@ -1006,7 +998,7 @@ void UnitManager::placeBuilding(const UnplacedBuilding &building)
     }
 
     buildingToPlace->isVisible = true;
-    add(buildingToPlace);
+    add(buildingToPlace, building.position);
     buildingToPlace->setCreationProgress(0);
     DBG << building.orientation;
     unit->setAngle(building.graphic->graphic()->orientationToAngle(building.orientation));

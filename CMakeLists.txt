@@ -80,16 +80,24 @@ if(MSVC)
     add_definitions(/D_USE_MATH_DEFINES)
     add_definitions(/wd4244 /wd4018 /wd4267 /wd4996 /wd4305 /wd4800 /wd4065)
 
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /fp:fast")
+
     find_package(SFML 2.5 CONFIG COMPONENTS system window graphics REQUIRED)
     find_package(BZip2)
     find_package(ZLIB)
     find_package(PNG)
     set(EXTRA_LIBS PNG::PNG ZLIB::ZLIB BZip2::BZip2)
 else()
-    if (CMAKE_BUILD_TYPE MATCHES Debug)
-        add_definitions(-fno-math-errno)
-    else()
-        add_definitions(-ffast-math) # So sue me, we're not doing anything sciency
+    add_definitions(-fno-math-errno)
+    if (NOT CMAKE_BUILD_TYPE MATCHES Debug)
+        # clang gets undefined references to builtin exp, log, etc. with -ffinite-math-only/-fno-honor-infinities, so we do this the hard way
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -funsafe-math-optimizations -fno-honor-nans -fassociative-math -freciprocal-math -fno-signed-zeros -fno-trapping-math -ffp-contract=fast")
+            add_definitions(-D__FAST_MATH__)
+        else()
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffast-math")
+        endif()
+        #string(REPLACE "-O3" "-Ofast" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
     endif()
 
     add_definitions(-Wall -Wextra -pedantic -Wno-sign-compare -Wno-unused-parameter)
@@ -107,8 +115,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # TODO: proper find_packages
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/mini_al/miniaudio.h)
-    message(STATUS "Using bundled mini_al")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/miniaudio/miniaudio.h)
+    message(STATUS "Using bundled miniaudio")
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/extern/)
 endif()
 
@@ -206,6 +214,10 @@ set(SETTINGS_SRC
 	src/settings/input.cpp
 	)
 
+set(SETTINGS_SRC
+    src/settings/input.cpp
+    )
+
 set(COMMUNICATION_SRC
     src/client/GameClient.cpp
     src/communication/TunnelToClient.cpp
@@ -220,6 +232,7 @@ set(COMMUNICATION_SRC
 set(UNSORTED_SRC
     src/audio/AudioPlayer.cpp
     src/audio/sts_mixer.cpp
+    src/audio/Implementations.cpp
 )
 
 set (UI_SRC
@@ -240,7 +253,6 @@ set (UI_SRC
 set (EDITOR_SRC
 	src/editor/editor.cpp
 	)
-
 set(DEBUG_SRC
     src/debug/AllunitsGameSample.cpp
     src/debug/BasicGameSample.cpp
@@ -288,6 +300,11 @@ target_link_libraries(test ${ALL_LIBRARIES})
 
 add_executable(ai-test test/ai-test.cpp $<TARGET_OBJECTS:freeaoe_common>)
 target_link_libraries(ai-test ${ALL_LIBRARIES})
+
+if (ENABLE_SANITIZERS)
+    set_source_files_properties(src/ai/grammar.gen.tab.cpp PROPERTIES COMPILE_FLAGS -fno-sanitize=all)
+    set_source_files_properties(src/ai/lex.yy.cc PROPERTIES COMPILE_FLAGS -fno-sanitize=all)
+endif()
 
 #if (CMAKE_BUILD_TYPE MATCHES Debug)
 #    if(CLANG_TIDY_EXE)

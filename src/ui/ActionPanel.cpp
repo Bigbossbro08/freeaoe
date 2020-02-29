@@ -313,12 +313,6 @@ void ActionPanel::updateButtons()
     }
 
 	// Still prefer Definitive Edition Way. Simple Delete button. Always felt it takes unnecessary Index space. I think I will do Attack Move first. Then do simple waypoint behaviour?
-    /*if (unit->data()->Type >= genie::Unit::MovingType && unit->data()->Type < genie::Unit::BuildingType) {
-        InterfaceButton killButton;
-        killButton.action = Command::Kill;
-        killButton.index = 3;
-        currentButtons.push_back(killButton);
-    }*/
 
     const std::unordered_set<Task> actions = unit->availableActions();
     std::unordered_set<genie::ActionType> addedTypes;
@@ -490,6 +484,32 @@ void ActionPanel::addMilitaryButtons(const std::shared_ptr<Unit> &unit)
         button.index = 0;
         button.action = Command::AttackGround;
 
+        currentButtons.push_back(button);
+    } else {
+        InterfaceButton button;
+        button.type = InterfaceButton::Other;
+        button.interfacePage = 0;
+        button.index = 3;
+        button.action = Command::AttackWithSword; // In AOC uses a very different Icon. Seems like a Beta formation. AttackWithSword=AttackMove
+        currentButtons.push_back(button);
+
+        button.type = InterfaceButton::Other;
+        button.interfacePage = 0;
+        button.index = 0;
+        button.action = Command::Patrol;
+        currentButtons.push_back(button);
+
+        button.type = InterfaceButton::Other;
+        button.interfacePage = 0;
+        button.index = 1;
+        button.action = Command::Guard;
+        currentButtons.push_back(button);
+
+
+        button.type = InterfaceButton::Other;
+        button.interfacePage = 0;
+        button.index = 2;
+        button.action = Command::Follow;
         currentButtons.push_back(button);
     }
 	else

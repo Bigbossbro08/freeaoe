@@ -67,13 +67,53 @@ IAction::UpdateResult ActionAttack::update(Time time)
         m_targetPosition = targetUnit->position();
     }
 
-    ScreenPos screenPosition = unit->position().toScreen();
-    ScreenPos targetScreenPosition = m_targetPosition.toScreen();
-    unit->setAngle(screenPosition.angleTo(targetScreenPosition));
+    const float distance = (targetUnit ?
+                unit->distanceTo(targetUnit) :
+                unit->distanceTo(m_targetPosition)
+                                )
+            / Constants::TILE_SIZE;
+
+    if (distance > unit->data()->Combat.MaxRange) {
+        if (!unit->data()->Speed) {
+            DBG << "this unit can't move...";
+            return IAction::UpdateResult::Failed;
+        }
+
+        std::shared_ptr<ActionMove> moveAction = ActionMove::moveUnitTo(unit, targetUnit, m_task);
+        moveAction->maxDistance = unit->data()->Combat.MaxRange * Constants::TILE_SIZE;
+        unit->prependAction(moveAction);
+
+        return IAction::UpdateResult::NotUpdated;
+    }
+
+    const float minDistance = unit->data()->Combat.MinRange * Constants::TILE_SIZE;
+    if (minDistance > 0.f && m_targetPosition.distance(unit->position()) < minDistance) {
+        if (!unit->data()->Speed) {
+            DBG << "this unit can't move...";
+            return IAction::UpdateResult::Failed;
+        }
+
+        if (!unit->findMatchingTask(genie::ActionType::RetreatToShootingRage, -1).data) {
+            return IAction::UpdateResult::Failed;
+        }
+
+        const float angleToTarget = unit->position().angleTo(m_targetPosition);
+
+        float targetX = m_targetPosition.x + cos(angleToTarget + M_PI) * minDistance;
+        float targetY = m_targetPosition.y + sin(angleToTarget + M_PI) * minDistance;
+
+        std::shared_ptr<ActionMove> moveAction = ActionMove::moveUnitTo(unit, MapPos(targetX, targetY), m_task);
+        unit->prependAction(moveAction);
+        return IAction::UpdateResult::NotUpdated;
+    }
 
     if (unitFiresMissiles(unit) && missilesUnitCanFire(unit) <= 0) {
         return IAction::UpdateResult::NotUpdated;
     }
+
+    ScreenPos screenPosition = unit->position().toScreen();
+    ScreenPos targetScreenPosition = m_targetPosition.toScreen();
+    unit->setAngle(screenPosition.angleTo(targetScreenPosition));
 
     float timeSinceLastAttack = (time - m_lastAttackTime) * 0.0015;
 
@@ -81,48 +121,6 @@ IAction::UpdateResult ActionAttack::update(Time time)
         m_firing = true;
     } else {
         m_firing = false;
-    }
-
-    const float angleToTarget = unit->position().toScreen().angleTo(m_targetPosition.toScreen());
-    unit->setAngle(angleToTarget);
-    const float distance = (targetUnit ?
-                unit->distanceTo(targetUnit) :
-                unit->distanceTo(m_targetPosition)
-                                )
-            / Constants::TILE_SIZE;
-
-    if (distance > unit->data()->Combat.MaxRange + 0.1) {
-        if (!unit->data()->Speed) {
-            DBG << "this unit can't move...";
-            return IAction::UpdateResult::Failed;
-        }
-
-        const float angleToTarget = unit->position().angleTo(m_targetPosition);
-
-        float targetX = m_targetPosition.x + cos(angleToTarget + M_PI) * unit->data()->Combat.MaxRange * Constants::TILE_SIZE;// / 1.1;
-        float targetY = m_targetPosition.y + sin(angleToTarget + M_PI) * unit->data()->Combat.MaxRange * Constants::TILE_SIZE;// / 1.1;
-//        DBG << "Unit out of range at distance" << distance << unit->distanceTo(targetUnit) << " moving to" << targetX << targetY;
-
-        unit->prependAction(ActionMove::moveUnitTo(unit, MapPos(targetX, targetY), m_task));
-        return IAction::UpdateResult::NotUpdated;
-    }
-    if (distance < unit->data()->Combat.MinRange) {
-        if (!unit->data()->Speed) {
-            DBG << "this unit can't move...";
-            return IAction::UpdateResult::Failed;
-        }
-
-        if (unit->findMatchingTask(genie::ActionType::RetreatToShootingRage, -1).data) {
-            const float angleToTarget = unit->position().angleTo(m_targetPosition);
-
-            float targetX = m_targetPosition.x + cos(angleToTarget + M_PI) * unit->data()->Combat.MinRange * Constants::TILE_SIZE * 1.1;
-            float targetY = m_targetPosition.y + sin(angleToTarget + M_PI) * unit->data()->Combat.MinRange * Constants::TILE_SIZE * 1.1;
-
-            unit->prependAction(ActionMove::moveUnitTo(unit, MapPos(targetX, targetY), m_task));
-            return IAction::UpdateResult::NotUpdated;
-        }
-
-        return IAction::UpdateResult::Failed;
     }
 
     if (timeSinceLastAttack < unit->data()->Combat.ReloadTime) {
@@ -185,7 +183,7 @@ void ActionAttack::spawnMissiles(const Unit::Ptr &source, const int unitId, cons
         MapPos pos = source->position();
         pos.x += -sin(source->angle()) * offsetX + cos(source->angle()) * offsetX;
         pos.y +=  cos(source->angle()) * offsetY + sin(source->angle()) * offsetY;
-        pos.z += graphicDisplacement[2];
+        pos.z += graphicDisplacement[2] * Constants::TILE_SIZE_HEIGHT;
 
         if (spawnArea[2] > 0) {
             pos.x += (rand() % int((100 - spawnArea[2]) * spawnArea[0] * Constants::TILE_SIZE)) / 100.;

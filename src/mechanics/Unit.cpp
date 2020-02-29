@@ -52,6 +52,17 @@
 #include "resource/Graphic.h"
 #include "render/GraphicRender.h"
 
+std::shared_ptr<Unit> Unit::fromEntity(const EntityPtr &entity) noexcept
+{
+    if (!entity) {
+        return nullptr;
+    }
+    if (!entity->isUnit()) {
+        return nullptr;
+    }
+    return std::static_pointer_cast<Unit>(entity);
+}
+
 Unit::Unit(const genie::Unit &data_, const std::shared_ptr<Player> &player_, UnitManager &unitManager) :
     Entity(Type::Unit, LanguageManager::getString(data_.LanguageDLLName) + " (" + std::to_string(data_.ID) + ")"),
     playerId(player_->playerId),
@@ -412,7 +423,7 @@ void Unit::checkForAutoTargets() noexcept
     float closestDistance = los * Constants::TILE_SIZE;
     const std::vector<std::weak_ptr<Entity>> entities = map->entitiesBetween(left, top, right, bottom);
     for (size_t i=0; i<entities.size(); i++) {
-        Unit::Ptr other = Entity::asUnit(entities[i]);
+        Unit::Ptr other = Unit::fromEntity(entities[i]);
         if (!other) {
             continue;
         }
@@ -458,13 +469,20 @@ void Unit::checkForAutoTargets() noexcept
     }
 
     DBG << "found auto task" << newTask.data->actionTypeName() << "for" << debugName;
-    IAction::assignTask(newTask, Entity::asUnit(shared_from_this()), target);
+    IAction::assignTask(newTask, Unit::fromEntity(shared_from_this()), target);
 }
 
 std::unordered_set<Task> Unit::availableActions() noexcept
 {
     std::unordered_set<Task> tasks;
     for (const genie::Task &task : DataManager::Inst().getTasks(m_data->ID)) {
+
+        // TODO: some units (archery range) have a combat task, but no attacks
+        // Could be if it needs garrisoned units?
+        if (task.ActionType == genie::ActionType::Combat && m_data->Combat.Attacks.empty()) {
+            continue;
+        }
+
         tasks.insert(Task(task, m_data->ID));
     }
 
@@ -480,6 +498,9 @@ std::unordered_set<Task> Unit::availableActions() noexcept
 
     for (const genie::Unit *swappable : owner->civilization.swappableUnits(m_data->Action.TaskSwapGroup)) {
         for (const genie::Task &task : DataManager::Inst().getTasks(swappable->ID)) {
+            if (task.ActionType == genie::ActionType::Combat && m_data->Combat.Attacks.empty()) {
+                continue;
+            }
             tasks.insert(Task(task, swappable->ID));
         }
     }
@@ -547,6 +568,8 @@ void Unit::setPosition(const MapPos &pos, const bool initial) noexcept
         forEachVisibleTile([&](const int tileX, const int tileY) {
             owner->visibility->addUnitLookingAt(tileX, tileY);
         });
+    } else {
+        WARN << "No player set!";
     }
 
     for (Annex &annex : annexes) {
@@ -698,9 +721,10 @@ void Unit::updateGraphic()
         break;
     case IAction::Type::Attack:
         if (m_currentAction->unitState() == IAction::UnitState::Attacking) {
-//            DBG << "Setting graphic";
             graphic = AssetManager::Inst()->getGraphic(data()->Combat.AttackGraphic);
             graphic->setRunOnce(true);
+        } else {
+            graphic = defaultGraphics;
         }
         break;
     default:
@@ -708,8 +732,8 @@ void Unit::updateGraphic()
         break;
     }
 
-    if (!graphic) {
-        DBG << "No graphic";
+    if (!graphic || !graphic->isValid()) {
+        DBG << "No graphic" << m_currentAction->type << debugName;
         graphic = defaultGraphics;
     }
 

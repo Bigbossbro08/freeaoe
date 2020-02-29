@@ -252,9 +252,9 @@ void GameState::setupScenario()
 
         for (const genie::ScnUnit &scnunit : scenario_->playerUnits[playerNum].units) {
             MapPos unitPos((scnunit.positionY) * Constants::TILE_SIZE, (scnunit.positionX) * Constants::TILE_SIZE, scnunit.positionZ * DataManager::Inst().terrainBlock().ElevHeight);
-            Unit::Ptr unit = UnitFactory::Inst().createUnit(scnunit.objectID, unitPos, player, *m_unitManager);
+            Unit::Ptr unit = UnitFactory::Inst().createUnit(scnunit.objectID, player, *m_unitManager);
             unit->spawnId = scnunit.spawnID;
-            m_unitManager->add(unit);
+            m_unitManager->add(unit, unitPos);
 
             unit->setAngle(scnunit.rotation - M_PI_2/2.);
 
@@ -270,7 +270,7 @@ void GameState::setupScenario()
     if (scenario_->playerData.player1CameraX >= 0 &&  scenario_->playerData.player1CameraX >= 0) {
         cameraPos = MapPos(scenario_->playerData.player1CameraX * Constants::TILE_SIZE, scenario_->playerData.player1CameraY * Constants::TILE_SIZE);
     } else {
-        cameraPos = MapPos (scenario_->players[humanPlayerId].initCameraX * Constants::TILE_SIZE, map_->height() - scenario_->players[humanPlayerId].initCameraY * Constants::TILE_SIZE);
+        cameraPos = MapPos (scenario_->players[humanPlayerId].initCameraX * Constants::TILE_SIZE, map_->pixelHeight() - scenario_->players[humanPlayerId].initCameraY * Constants::TILE_SIZE);
     }
     renderTarget_->camera()->setTargetPosition(cameraPos);
 
@@ -295,6 +295,6 @@ void GameState::setupGame(const GameType /*gameType*/)
     m_players.push_back(m_humanPlayer);
     m_players.push_back(sampleGameSetup->getEnemyPlayer());
 
-    MapPos cameraPos(map_->width() / 2, map_->height()  / 2);
+    MapPos cameraPos(map_->pixelWidth() / 2, map_->pixelHeight()  / 2);
     renderTarget_->camera()->setTargetPosition(cameraPos);
 }

@@ -33,6 +33,7 @@
 #include "resource/LanguageManager.h"
 #include "ui/FileDialog.h"
 #include "ui/HistoryScreen.h"
+#include "editor/Editor.h"
 #include "debug/SampleGameFactory.h"
 
 #include "ui/HomeScreen.h"
@@ -75,6 +76,7 @@ int main(int argc, char **argv) try
             }
             DBG << "Loaded game data";
 
+            AssetManager::create(DataManager::Inst().isHd());
             if (!AssetManager::Inst()->initialize(dataPath, DataManager::Inst().gameVersion())) {
                 throw std::runtime_error("Failed to load game assets");
             }
@@ -138,12 +140,23 @@ int main(int argc, char **argv) try
                     return 1;
                 }
                 history.display();
+<<<<<<< HEAD
             }
 			else if (button == HomeScreen::Button::MapEditor)
 			{
 			}
 			else if (button == HomeScreen::Button::Tutorial) 
 			{
+=======
+            } else if (button == HomeScreen::Button::MapEditor) {
+                Editor editor;
+                if (editor.init()) {
+                    editor.run();
+                } else {
+                    WARN << "Failed to load editor";
+                }
+            } else if (button == HomeScreen::Button::Tutorial) {
+>>>>>>> 282bec2e964f9f3610635d4226846aadd4789adf
                 startGame = true;
                 try 
 				{

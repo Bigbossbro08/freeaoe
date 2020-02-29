@@ -25,6 +25,7 @@
 #include <genie/resource/SlpFrame.h>
 #include <memory>
 
+#include "audio/AudioPlayer.h"
 #include "TextButton.h"
 #include "core/Logger.h"
 #include "core/Utility.h"
@@ -38,6 +39,11 @@ namespace genie {
 class PalFile;
 }  // namespace genie
 
+HomeScreen::~HomeScreen()
+{
+    AudioPlayer::instance().stopStream("stream/xopen.mp3");
+}
+
 HomeScreen::HomeScreen() :
     UiScreen(DataManager::Inst().isHd() ? "main.sin" : "xmain.sin")
 {
@@ -49,6 +55,8 @@ bool HomeScreen::init()
     if (!UiScreen::init()) {
         return false;
     }
+
+    AudioPlayer::instance().playStream("stream/xopen.mp3");
 
     const bool isHd = DataManager::Inst().isHd();
 
@@ -346,6 +354,7 @@ bool HomeScreen::handleMouseEvent(const sf::Event &event)
         case Button::Exit:
         case Button::History:
         case Button::Tutorial:
+        case Button::MapEditor:
             return true;
         default:
             break;

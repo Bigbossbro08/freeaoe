@@ -17,7 +17,6 @@
 */
 
 #include "Entity.h"
-#include "Unit.h"
 #include "Missile.h"
 #include "Building.h"
 #include "core/Constants.h"
@@ -60,16 +59,6 @@ bool Entity::update(Time time) noexcept
     return updated && isVisible;
 }
 
-std::shared_ptr<Unit> Entity::asUnit(const EntityPtr &entity) noexcept {
-    if (!entity) {
-        return nullptr;
-    }
-    if (!entity->isUnit()) {
-        return nullptr;
-    }
-    return std::static_pointer_cast<Unit>(entity);
-}
-
 std::shared_ptr<Missile> Entity::asMissile(const std::shared_ptr<Entity> &entity) noexcept
 {
     if (!entity) {
@@ -91,12 +80,13 @@ void Entity::setMap(const MapPtr &newMap) noexcept
     MapPtr oldMap = m_map.lock();
     if (oldMap) {
         oldMap->removeEntityAt(tileX, tileY, id);
+
+        if (newMap) { // todo assume we have a valid position
+            newMap->addEntityAt(tileX, tileY, shared_from_this());
+        }
     }
 
     m_map = newMap;
-    if (newMap) {
-        newMap->addEntityAt(tileX, tileY, shared_from_this());
-    }
 }
 
 MapPtr Entity::map() const noexcept

@@ -91,13 +91,20 @@ bool Missile::update(Time time) noexcept
     Player::Ptr player = m_player.lock();
 
     if (position().z <= map->elevationAt(position())) {
-        DBG << "we hit the ground";
+        DBG << "we hit the ground, we're at" << position().z << "ground at" << map->elevationAt(position());
         die();
         return false;
     }
 
     if (m_previousUpdateTime == 0) {
-        m_distanceLeft = position().distance(m_targetPosition);
+        Unit::Ptr sourceUnit = m_sourceUnit.lock();
+        if (!sourceUnit) {
+            WARN << "Source unit gone before we could start";
+            die();
+            return false;
+        }
+
+        m_distanceLeft = std::min(position().distance(m_targetPosition), sourceUnit->data()->Combat.MaxRange * Constants::TILE_SIZE);;
         m_angle = std::atan2(m_targetPosition.y - position().y, m_targetPosition.x - position().x);
         float flightTime = m_distanceLeft / m_data.Speed;
         float timeToApex = flightTime / 2;
@@ -142,6 +149,12 @@ bool Missile::update(Time time) noexcept
         }
 
     }
+    if (movement != 0.f && m_zVelocity != 0.f) {
+        const int nextFrame = std::round((0.5 + m_zVelocity / movement) * m_renderer->frameCount());
+        m_renderer->setCurrentFrame(std::clamp(nextFrame, 0, m_renderer->frameCount()));
+    } else {
+        m_renderer->setCurrentFrame(0);
+    }
 
     m_renderer->setAngle(position().toScreen().angleTo(newPos.toScreen()));
 
@@ -175,7 +188,7 @@ bool Missile::update(Time time) noexcept
                 }
 
                 for (const std::weak_ptr<Entity> &entity : entities) {
-                    Unit::Ptr otherUnit = Entity::asUnit(entity);
+                    Unit::Ptr otherUnit = Unit::fromEntity(entity);
                     if (IS_UNLIKELY(!otherUnit)) {
                         continue;
                     }

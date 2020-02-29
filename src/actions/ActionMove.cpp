@@ -128,16 +128,30 @@ MapPos ActionMove::findClosestWalkableBorder(const MapPos &start, const MapPos &
         return start;
     }
 
-    std::shared_ptr<Unit> targetUnit;
+//    if (minDistance > 0.f && target.distance(start) < minDistance) {
+//        const float angleToTarget = start.angleTo(target);
+//        DBG << "too close" << minDistance << target.distance(start) << angleToTarget;
+
+//        target.x = start.x + cos(angleToTarget) * minDistance + 0.1;
+//        target.y = start.y + sin(angleToTarget) * minDistance + 0.1;
+
+//        if (isPassable(target.x, target.y)) {
+//            m_destination = target;
+//            DBG << "position away is okay";
+//            return target;
+//        }
+//    }
+
     const float xSize = unit->data()->Size.x * Constants::TILE_SIZE;
     const float ySize = unit->data()->Size.y * Constants::TILE_SIZE;
     const float radius = std::max(xSize, ySize);
+    float clearanceLength = 0.f;
 
     const int tileX = target.x / Constants::TILE_SIZE;
     const int tileY = target.y / Constants::TILE_SIZE;
-    for (int dx = tileX-1; dx<=tileX+1 && !targetUnit; dx++) {
-        for (int dy = tileY-1; dy<=tileY+1 && !targetUnit; dy++) {
-            if (IS_UNLIKELY(dx < 0 || dy < 0 || dx >= m_map->getCols() || dy >= m_map->getRows())) {
+    for (int dx = tileX-1; dx<=tileX+1; dx++) {
+        for (int dy = tileY-1; dy<=tileY+1; dy++) {
+            if (IS_UNLIKELY(dx < 0 || dy < 0 || dx >= m_map->columnCount() || dy >= m_map->rowCount())) {
                 continue;
             }
             const std::vector<std::weak_ptr<Entity>> &entities = m_map->entitiesAt(dx, dy);
@@ -147,7 +161,7 @@ MapPos ActionMove::findClosestWalkableBorder(const MapPos &start, const MapPos &
             }
 
             for (const std::weak_ptr<Entity> &entity : entities) {
-                Unit::Ptr otherUnit = Entity::asUnit(entity);
+                Unit::Ptr otherUnit = Unit::fromEntity(entity);
                 if (IS_UNLIKELY(!otherUnit)) {
                     continue;
                 }
@@ -160,31 +174,39 @@ MapPos ActionMove::findClosestWalkableBorder(const MapPos &start, const MapPos &
                     continue;
                 }
 
-                if (otherUnit->distanceTo(target) < radius) {
-//                    DBG << "unit in our spot, trying to find a place close to it" << otherUnit->debugName;
-                    targetUnit = std::move(otherUnit);
-                    break;
+                if (otherUnit->distanceTo(otherUnit) < 0.1f) {// radius + otherUnit->clearanceSize().width) {
+                    const Size targetSize = otherUnit->clearanceSize();
+                    const float targetRadius = std::max(targetSize.width, targetSize.height);
+                    clearanceLength = std::max(targetRadius + std::max(targetRadius, radius), clearanceLength);
                 }
             }
         }
     }
 
-    MapPos newPos = start;
-    if (targetUnit) {
+    MapPos newPos = target;
+    if (clearanceLength > 0.f) {
+//        DBG << "Found target unit";
 #ifdef DEBUG
         testedPoints.push_back(target);
 #endif
-        const Size targetSize = targetUnit->clearanceSize();
-        const float targetRadius = std::max(targetSize.width, targetSize.height);
-        const float clearanceLength = std::max(targetRadius, radius);
-
+        const float angleToTarget = start.angleTo(target);
 
         const float stepSize = M_PI / radius;
 
         float lowestDistance = std::numeric_limits<float>::max();
 
+        bool left = false;
         for (float angleOffset = 0; angleOffset < M_PI*2.; angleOffset += stepSize) {
-            MapPos potential(cos(angleOffset), sin(angleOffset));
+            MapPos potential(cos(angleToTarget), sin(angleToTarget));
+            if (left) {
+                potential.x += cos(angleOffset);
+                potential.y += sin(angleOffset);
+                left = false;
+            } else {
+                potential.x -= cos(angleOffset);
+                potential.y -= sin(angleOffset);
+                left = true;
+            }
             potential = potential * clearanceLength + target;
             if (!isPassable(potential.x, potential.y)) {
                 continue;
@@ -202,6 +224,7 @@ MapPos ActionMove::findClosestWalkableBorder(const MapPos &start, const MapPos &
         }
     }
     if (isPassable(newPos.x, newPos.y)) {
+//        DBG << "Found way around target";
         return newPos;
     }
     // follow a straight line from the target to our location, to find the closest position we can get to
@@ -266,14 +289,16 @@ MapPos ActionMove::findClosestWalkableBorder(const MapPos &start, const MapPos &
         x += uincrX;
         y += uincrY;
 
+#ifdef DEBUG
+        testedPoints.push_back(MapPos(x, y));
+#endif
+
         if (isPassable(x, y)) {
             x += uincrX;
             y += uincrY;
             break;
         }
     } while (u <= uend);
-
-
 
     return MapPos(x, y);
 }
@@ -296,6 +321,35 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     }
 
     MapPos unitPosition = unit->position();
+
+    // TODO differentiate between max manhattan distance (square obstruction type) and euclidian distance (round obstruction type)
+    MapRect targetRect(m_destination, Size(maxDistance + 1, maxDistance + 1));
+
+    Unit::Ptr targetUnit = m_targetUnit.lock();
+    if (targetUnit) {
+        if (unit->distanceTo(targetUnit) < 0.f) {
+            return UpdateResult::Completed;
+        }
+
+        const Size size = targetUnit->clearanceSize();
+        targetRect.width = size.width;
+        targetRect.height = size.height;
+        targetRect.x -= targetRect.width/2;
+        targetRect.y -= targetRect.height/2;
+    }
+    if (targetUnit && (targetUnit->position()/50).rounded() != (m_lastTargetUnitPosition/50).rounded()) {
+        m_lastTargetUnitPosition = targetUnit->position();
+        m_destination = m_lastTargetUnitPosition;
+
+        if (std::floor(unitPosition.distance(m_destination)) < 0.1) {// std::max(unit->clearanceSize().width, unit->clearanceSize().height) + 1) {
+            return UpdateResult::Completed;
+        }
+
+        updatePath();
+
+        return UpdateResult::NotUpdated;
+    }
+
     if (!isPassable(unitPosition.x, unitPosition.y)) {
         WARN << "we got stuck!" << unit->debugName;
         unitPosition = findClosestWalkableBorder(m_destination, unitPosition, 1);
@@ -310,7 +364,7 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     }
 
     if (!m_prevTime) {
-        if (unitPosition.distance(m_destination) < 1) { // just in case
+        if (unitPosition.distance(m_destination) < 1 || targetRect.contains(unitPosition)) { // just in case
             return UpdateResult::Completed;
         }
 
@@ -319,11 +373,16 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
         if (m_path.empty()) {
             return UpdateResult::Failed;
         }
-//        if (m_path.back() != unitPosition) {
-//            unit->setPosition(m_path.back()); // Just in case we had to do a coarse check
-//            return UpdateResult::Updated;
-//        }
         return UpdateResult::NotUpdated;
+    }
+
+    if (targetUnit) { // check if it moved
+        const double targetMovedDistance = m_destination.distance(targetUnit->position());
+        m_destination = targetUnit->position();
+        if (targetMovedDistance > 1) {  // chosen by dice roll
+            DBG << "Unit moved, repathing";
+            updatePath();
+        }
     }
 
     if (m_targetReached) {
@@ -333,7 +392,7 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     if (m_path.empty()) {
         m_targetReached = true;
 
-        if (unitPosition.distance(m_destination) < 1) {
+        if (unitPosition.distance(m_destination) < 1 || targetRect.contains(unitPosition)) {
             if (isPassable(m_destination.x, m_destination.y)) {
                 m_destination.z = m_map->elevationAt(m_destination);
 
@@ -382,7 +441,7 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
 
         updatePath();
 
-        if (m_destination.rounded() == unit->position().rounded()) {
+        if (m_destination.rounded() == unit->position().rounded() || targetRect.contains(unit->position())) {
             DBG << "already in place";
             unitPosition.z = m_map->elevationAt(unitPosition);
             unit->setPosition(m_destination);
@@ -406,8 +465,10 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
         return UpdateResult::NotUpdated;
     }
 
-    const float direction = std::atan2(nextPos.y - unitPosition.y, nextPos.x - unitPosition.x);
+
     MapPos newPos = unitPosition;
+
+    const float direction = std::atan2(nextPos.y - unitPosition.y, nextPos.x - unitPosition.x);
     if (util::hypot(nextPos.x - newPos.x, nextPos.y - newPos.y) < movement) {
         newPos = nextPos;
     } else {
@@ -415,30 +476,24 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
         newPos.y += std::sin(direction) * movement;
     }
 
-    // Try to wiggle past
-    if (!isPassable(newPos.x, newPos.y)) {
-        newPos = unitPosition;
-        movement = std::min(movement, util::hypot(nextPos.x - newPos.x, nextPos.y - newPos.y));
-        newPos.x += std::cos(direction + M_PI_2/2) * movement;
-        newPos.y += std::sin(direction + M_PI_2/2) * movement;
-    }
-    // Try to wiggle past, other direction
-    if (!isPassable(newPos.x, newPos.y)) {
-        newPos = unitPosition;
-        movement = std::min(movement, util::hypot(nextPos.x - newPos.x, nextPos.y - newPos.y));
-        newPos.x += std::cos(direction - M_PI_2/2) * movement;
-        newPos.y += std::sin(direction - M_PI_2/2) * movement;
-    }
-
     if (!isPassable(newPos.x, newPos.y)) {
         if (!isPassable(m_destination.x, m_destination.y)) {
             DBG << "destination isn't passable, trying again next round";
             return UpdateResult::NotUpdated;
         }
+        if (unitPosition.distance(m_destination) < 1) {
+            DBG << "can't move forward, but close enough to destination" << distanceLeft;
+            m_destination.z = m_map->elevationAt(m_destination);
+            unit->setPosition(m_destination);
+            return UpdateResult::Completed;
+        }
+        DBG << "can't move forward and too far from the destination" << distanceLeft << "finding intermediat path for" << unit->debugName;
+        DBG << unitPosition << newPos << movement;
+
         DBG << "can't move forward, finding intermediat path for" << unit->debugName;
 
         std::vector<MapPos> partial = findPath(unitPosition, nextPos, 1);
-        if (partial.size() < 2) {
+        if (partial.size() < 1) {
             WARN << "failed to find intermediary path";
             m_targetReached = true;
             m_prevTime = time;
@@ -451,8 +506,9 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
             unit->setPosition(unitPosition);
             return UpdateResult::Failed;
         } else {
-            DBG << "found intermediary";
+            DBG << "found intermediary from" << unitPosition << "to" << nextPos;
             m_path.insert(m_path.begin(), ++partial.begin(), partial.end());
+
             m_prevTime = time;
 
             if (!isPassable(unitPosition.x, unitPosition.y)) {
@@ -480,6 +536,20 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     m_prevTime = time;
 
     return UpdateResult::Updated;
+}
+
+std::shared_ptr<ActionMove> ActionMove::moveUnitTo(const UnitPtr &unit, const UnitPtr &targetUnit, const Task &task) noexcept
+{
+    if (!unit->data()->Speed) {
+        DBG << "Handed unit that can't move" << unit->debugName;
+        return nullptr;
+    }
+
+
+    std::shared_ptr<ActionMove> action (new ActionMove(targetUnit->position(), unit, task));
+    action->m_targetUnit = targetUnit;
+
+    return action;
 }
 
 std::shared_ptr<ActionMove> ActionMove::moveUnitTo(const Unit::Ptr &unit, MapPos destination, const Task &task) noexcept
@@ -521,6 +591,7 @@ static std::vector<MapPos> simplifyAngles(const std::vector<MapPos> &path)
 }
 #endif
 
+#if 0
 static std::vector<MapPos> simplifyRdp(const std::vector<MapPos> &path, const float epsilon) noexcept
 {
     if (path.empty()) {
@@ -569,6 +640,7 @@ static std::vector<MapPos> simplifyRdp(const std::vector<MapPos> &path, const fl
 
     return cleanedPath;
 }
+#endif
 
 std::vector<MapPos> ActionMove::findPath(MapPos start, MapPos end, int coarseness) noexcept
 {
@@ -587,6 +659,10 @@ std::vector<MapPos> ActionMove::findPath(MapPos start, MapPos end, int coarsenes
     int startY = std::round(start.y / coarseness);
     int endX = std::round(end.x / coarseness);
     int endY = std::round(end.y / coarseness);
+    if (startX == endX && startY == endY) {
+        DBG << "Already at right position" << start << end;
+        return {start};
+    }
     if (!isPassable(startX * coarseness, startY * coarseness)) {
         WARN << "handed unpassable start, attempting to get out";
         start = findClosestWalkableBorder(MapPos(endX * coarseness, endY * coarseness), MapPos(startX * coarseness, startY * coarseness), coarseness);
@@ -611,6 +687,17 @@ std::vector<MapPos> ActionMove::findPath(MapPos start, MapPos end, int coarsenes
         return path;
     }
 
+
+    MapRect targetRect(MapPos(endX-coarseness/2, endY-coarseness/2), Size(maxDistance / coarseness + coarseness, maxDistance / coarseness + coarseness));
+    const Unit::Ptr targetUnit = m_targetUnit.lock();
+    if (targetUnit) {
+        const Size size = targetUnit->clearanceSize() / coarseness;
+        targetRect.width += size.width;
+        targetRect.height += size.height;
+        targetRect.x -= targetRect.width/2;
+        targetRect.y -= targetRect.height/2;
+    }
+
     PathPoint currentPosition(startX, startY);
 
     std::unordered_map<PathPoint, PathPoint> cameFrom;
@@ -631,7 +718,7 @@ std::vector<MapPos> ActionMove::findPath(MapPos start, MapPos end, int coarsenes
         parent = queue.top();
         queue.pop();
 
-        if (parent.x == endX && parent.y == endY) {
+        if (targetRect.contains(parent.x, parent.y)) {// && (minDistance <= 0.f || parent.distance > minDistance/coarseness)) {
             break;
         }
 
@@ -746,6 +833,7 @@ std::vector<MapPos> ActionMove::findPath(MapPos start, MapPos end, int coarsenes
 //    return simplifyRdp(simplifyAngles(path), coarseness);
 //    return simplifyAngles(path);
 //    return simplifyRdp(path, coarseness*1.5);
+
 }
 
 bool ActionMove::isPassable(const float x, const float y) noexcept
@@ -755,7 +843,7 @@ bool ActionMove::isPassable(const float x, const float y) noexcept
     }
     const int tileX = x / Constants::TILE_SIZE + 0.5;
     const int tileY = y / Constants::TILE_SIZE + 0.5;
-    if (IS_UNLIKELY(tileX >= m_map->getCols() || tileY >= m_map->getRows())) {
+    if (IS_UNLIKELY(tileX >= m_map->columnCount() || tileY >= m_map->rowCount())) {
         return false;
     }
 
@@ -781,13 +869,13 @@ bool ActionMove::isPassable(const float x, const float y) noexcept
 
     for (int dx = tileX-1; dx<=tileX+1; dx++) {
         for (int dy = tileY-1; dy<=tileY+1; dy++) {
-            if (IS_UNLIKELY(dx < 0 || dy < 0 || dx >= m_map->getCols() || dy >= m_map->getRows())) {
+            if (IS_UNLIKELY(dx < 0 || dy < 0 || dx >= m_map->columnCount() || dy >= m_map->rowCount())) {
                 continue;
             }
             const std::vector<std::weak_ptr<Entity>> &entities = m_map->entitiesAt(dx, dy);
 
             for (size_t i=0; i<entities.size(); i++) {
-                const Unit::Ptr otherUnit = Entity::asUnit(entities[i]);
+                const Unit::Ptr otherUnit = Unit::fromEntity(entities[i]);
                 if (IS_UNLIKELY(!otherUnit)) {
                     continue;
                 }
@@ -880,13 +968,13 @@ void ActionMove::updatePath() noexcept
 
     MapPos newDest = m_destination;
     if (!isPassable(m_destination.x, m_destination.y)) {
-        WARN << "target not passable, finding closest possible position";
+//        WARN << "target not passable, finding closest possible position";
         newDest = findClosestWalkableBorder(unit->position(), m_destination, 2);
         m_destination = newDest;
     }
 
     TIME_TICK;
-    m_path = simplifyRdp(findPath(unit->position(), newDest, 2), 2 * 1.3);
+    m_path = findPath(unit->position(), newDest, 2);
 
     // Try coarser
     // Uglier, but hopefully faster
@@ -896,7 +984,7 @@ void ActionMove::updatePath() noexcept
             newDest = findClosestWalkableBorder(unit->position(), m_destination, 5);
             m_destination = newDest;
         }
-        m_path = simplifyRdp(findPath(unit->position(), newDest, 5), 5 * 1.3);
+        m_path = findPath(unit->position(), newDest, 5);
     }
 
     TIME_TICK;
@@ -907,7 +995,7 @@ void ActionMove::updatePath() noexcept
             newDest = findClosestWalkableBorder(unit->position(), m_destination, 10);
             m_destination = newDest;
         }
-        m_path = simplifyRdp(findPath(unit->position(), newDest, 10), 10 * 1.3);
+        m_path = findPath(unit->position(), newDest, 10);
     }
 
     if (m_path.empty()) {

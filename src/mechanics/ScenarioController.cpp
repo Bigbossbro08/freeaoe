@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "audio/AudioPlayer.h"
 #include "mechanics/Unit.h"
 #include "mechanics/UnitManager.h"
 #include "mechanics/GameState.h"
@@ -340,7 +341,7 @@ void ScenarioController::handleTriggerEffect(const genie::TriggerEffect &effect)
         m_triggers[effect.trigger].enabled = false;
         break;
     case genie::TriggerEffect::DisplayInstructions:
-        DBG << "TODO: implement sound for instructions";
+        AudioPlayer::instance().playStream("scenario/" + effect.soundFile + ".mp3");
         if (m_engine) {
             m_engine->addMessage(effect.message);
         } else {
@@ -369,9 +370,9 @@ void ScenarioController::handleTriggerEffect(const genie::TriggerEffect &effect)
             break;
         }
         MapPos location(effect.location.y * Constants::TILE_SIZE, effect.location.x * Constants::TILE_SIZE);
-        Unit::Ptr unit = UnitFactory::Inst().createUnit(effect.object, location, player, *m_gameState->unitManager());
+        Unit::Ptr unit = UnitFactory::Inst().createUnit(effect.object, player, *m_gameState->unitManager());
         DBG << "Created" << unit->debugName;
-        m_gameState->unitManager()->add(unit);
+        m_gameState->unitManager()->add(unit, location);
         break;
     }
     case genie::TriggerEffect::RemoveObject: {
@@ -383,7 +384,7 @@ void ScenarioController::handleTriggerEffect(const genie::TriggerEffect &effect)
                                                               effect.areaTo.x);
 
         for (const std::weak_ptr<Entity> &entity : entities) {
-            Unit::Ptr unit = Entity::asUnit(entity);
+            Unit::Ptr unit = Unit::fromEntity(entity);
             if (!unit) {
                 WARN << "got invalid unit in area for effect";
                 continue;
@@ -410,7 +411,7 @@ void ScenarioController::handleTriggerEffect(const genie::TriggerEffect &effect)
         targetPos *= Constants::TILE_SIZE;
 
         for (const std::weak_ptr<Entity> &entity : entities) {
-            Unit::Ptr unit = Entity::asUnit(entity);
+            Unit::Ptr unit = Unit::fromEntity(entity);
             if (!unit) {
                 WARN << "got invalid unit in area for effect";
                 continue;

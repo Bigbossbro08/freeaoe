@@ -1,6 +1,10 @@
 #pragma once
 
 #include "core/Types.h"
+<<<<<<< HEAD
+=======
+
+>>>>>>> 282bec2e964f9f3610635d4226846aadd4789adf
 #include <SFML/Graphics/Text.hpp>
 #include <memory>
 
@@ -58,6 +62,5 @@ private:
     genie::SlpFilePtr m_cursorsFile;
     ScreenPos m_position;
 	sf::Text m_cursor_pos_text;
-
     std::shared_ptr<IRenderTarget> m_renderTarget;
 };

@@ -30,6 +30,8 @@
 
 #include "sts_mixer.h"
 
+#include <algorithm>
+
 enum {
   STS_MIXER_VOICE_STOPPED,
   STS_MIXER_VOICE_PLAYING,
@@ -37,17 +39,8 @@ enum {
 };
 
 
-static float sts_mixer__clamp(const float value, const float min, const float max) {
-  if (value < min) { return min; }
-  if (value > max) { return max; }
-  return value;
-}
-
-
 static float sts_mixer__clamp_sample(const float sample) {
-  if (sample < -1.0f) { return -1.0f; }
-  if (sample > 1.0f) { return 1.0f; }
-  return sample;
+  return std::clamp(sample, -1.f, 1.f);
 }
 
 
@@ -70,7 +63,11 @@ static float sts_mixer__get_sample(sts_mixer_sample_t* sample, unsigned int posi
 static void sts_mixer__reset_voice(sts_mixer_t* mixer, const int i) {
   sts_mixer_voice_t*  voice = &mixer->voices[i];
   voice->state = STS_MIXER_VOICE_STOPPED;
+  if (voice->stream && voice->stream->stop_callback) {
+    voice->stream->stop_callback(i, &voice->stream->sample, voice->stream->userdata);
+  }
   delete voice->sample;
+  delete voice->stream;
   voice->sample = nullptr;
   voice->stream = nullptr;
   voice->position = voice->gain = voice->pitch = voice->pan = 0.0f;
@@ -119,8 +116,8 @@ int sts_mixer_play_sample(sts_mixer_t* mixer, sts_mixer_sample_t* sample, float 
   if (i >= 0) {
     voice = &mixer->voices[i];
     voice->gain = gain;
-    voice->pitch = sts_mixer__clamp(pitch, 0.1f, 10.0f);
-    voice->pan = sts_mixer__clamp(pan * 0.5f, -0.5f, 0.5f);
+    voice->pitch = std::clamp(pitch, 0.1f, 10.0f);
+    voice->pan = std::clamp(pan * 0.5f, -0.5f, 0.5f);
     voice->position = 0.0f;
     delete voice->sample;
     voice->sample = sample;
@@ -204,9 +201,13 @@ void sts_mixer_mix_audio(sts_mixer_t* mixer, void* output, unsigned int samples)
           voice->position = 0.0f;
           position = 0;
         }
-        left += sts_mixer__clamp_sample(sts_mixer__get_sample(&voice->stream->sample, position) * voice->gain);
-        right += sts_mixer__clamp_sample(sts_mixer__get_sample(&voice->stream->sample, position + 1) * voice->gain);
-        voice->position += (float)voice->stream->sample.frequency * advance;
+        if (voice->stream->sample.length > 0) {
+          left += sts_mixer__clamp_sample(sts_mixer__get_sample(&voice->stream->sample, position) * voice->gain);
+          right += sts_mixer__clamp_sample(sts_mixer__get_sample(&voice->stream->sample, position + 1) * voice->gain);
+          voice->position += (float)voice->stream->sample.frequency * advance;
+        } else {
+          sts_mixer__reset_voice(mixer, i);
+        }
       }
     }
 
