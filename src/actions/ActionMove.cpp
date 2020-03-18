@@ -320,12 +320,31 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
         m_passableCached.reset();
     }
 
-    MapPos unitPosition = unit->position();
-
     // TODO differentiate between max manhattan distance (square obstruction type) and euclidian distance (round obstruction type)
     MapRect targetRect(m_destination, Size(maxDistance + 1, maxDistance + 1));
+    MapPos unitPosition = unit->position();
 
     Unit::Ptr targetUnit = m_targetUnit.lock();
+
+    // First update
+    if (!m_prevTime) {
+        if (unitPosition.distance(m_destination) < 1 || targetRect.contains(unitPosition)) { // just in case
+            return UpdateResult::Completed;
+        }
+        if (targetUnit) {
+            m_lastTargetUnitPosition = targetUnit->position();
+            m_destination = m_lastTargetUnitPosition;
+        }
+
+        m_prevTime = time;
+        updatePath();
+        if (m_path.empty()) {
+            return UpdateResult::Failed;
+        }
+
+        return UpdateResult::NotUpdated;
+    }
+
     if (targetUnit) {
         if (unit->distanceTo(targetUnit) < 0.f) {
             return UpdateResult::Completed;
@@ -336,18 +355,19 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
         targetRect.height = size.height;
         targetRect.x -= targetRect.width/2;
         targetRect.y -= targetRect.height/2;
-    }
-    if (targetUnit && (targetUnit->position()/50).rounded() != (m_lastTargetUnitPosition/50).rounded()) {
-        m_lastTargetUnitPosition = targetUnit->position();
-        m_destination = m_lastTargetUnitPosition;
 
-        if (std::floor(unitPosition.distance(m_destination)) < 0.1) {// std::max(unit->clearanceSize().width, unit->clearanceSize().height) + 1) {
-            return UpdateResult::Completed;
+        if ((targetUnit->position()/50).rounded() != (m_lastTargetUnitPosition/50).rounded()) {
+            m_lastTargetUnitPosition = targetUnit->position();
+            m_destination = m_lastTargetUnitPosition;
+
+            if (std::floor(unitPosition.distance(m_destination)) < 0.1) {// std::max(unit->clearanceSize().width, unit->clearanceSize().height) + 1) {
+                return UpdateResult::Completed;
+            }
+
+            updatePath();
+
+            return UpdateResult::NotUpdated;
         }
-
-        updatePath();
-
-        return UpdateResult::NotUpdated;
     }
 
     if (!isPassable(unitPosition.x, unitPosition.y)) {
@@ -363,27 +383,15 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
         return UpdateResult::Failed;
     }
 
-    if (!m_prevTime) {
-        if (unitPosition.distance(m_destination) < 1 || targetRect.contains(unitPosition)) { // just in case
-            return UpdateResult::Completed;
-        }
-
-        m_prevTime = time;
-        updatePath();
-        if (m_path.empty()) {
-            return UpdateResult::Failed;
-        }
-        return UpdateResult::NotUpdated;
-    }
-
-    if (targetUnit) { // check if it moved
-        const double targetMovedDistance = m_destination.distance(targetUnit->position());
-        m_destination = targetUnit->position();
-        if (targetMovedDistance > 1) {  // chosen by dice roll
-            DBG << "Unit moved, repathing";
-            updatePath();
-        }
-    }
+//    if (targetUnit) { // check if it moved
+//        const double targetMovedDistance = m_lastTargetPosition.distance(targetUnit->position());
+//        m_lastTargetUnitPosition = targetUnit->position();
+//        m_destination = m_lastTargetUnitPosition;
+//        if (targetMovedDistance > 1) {  // chosen by dice roll
+//            DBG << "Unit moved, repathing";
+//            updatePath();
+//        }
+//    }
 
     if (m_targetReached) {
         return UpdateResult::Completed;
@@ -413,6 +421,7 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     float distanceLeft = util::hypot(m_path.back().x - unitPosition.x, m_path.back().y - unitPosition.y);
     while (movement > distanceLeft && !m_path.empty() && isPassable(m_path.back().x, m_path.back().y)) {
         movement -= distanceLeft;
+        m_prevPathPoint = unitPosition;
         unitPosition = m_path.back();
         unitPosition.z = m_map->elevationAt(unitPosition);
         m_path.pop_back();
@@ -477,6 +486,22 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     }
 
     if (!isPassable(newPos.x, newPos.y)) {
+        DBG << "Wiggle left";
+        newPos = unitPosition;
+
+        newPos.x += std::cos(direction + M_PI_2) * movement;
+        newPos.y += std::sin(direction + M_PI_2) * movement;
+    }
+
+    if (!isPassable(newPos.x, newPos.y)) {
+        DBG << "Wiggle right";
+        newPos = unitPosition;
+
+        newPos.x += std::cos(direction - M_PI_2) * movement;
+        newPos.y += std::sin(direction - M_PI_2) * movement;
+    }
+
+    if (!isPassable(newPos.x, newPos.y)) {
         if (!isPassable(m_destination.x, m_destination.y)) {
             DBG << "destination isn't passable, trying again next round";
             return UpdateResult::NotUpdated;
@@ -522,9 +547,19 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     }
 
 
-    ScreenPos sourceScreen = unitPosition.toScreen();
-    ScreenPos targetScreen = newPos.toScreen();
-    unit->setAngle(sourceScreen.angleTo(targetScreen));
+    const ScreenPos sourceScreen = unitPosition.toScreen();
+    const ScreenPos targetScreen = newPos.toScreen();
+    const float newAngle = sourceScreen.angleTo(targetScreen);
+    if (m_path.size() < 2) {
+        unit->setAngle(newAngle);
+    } else {
+        // Avoid changing the angle quickly back and forth in some corner cases, it looks dumb
+        nextPos = *(m_path.end() - 2);
+        nextPos.z = m_map->elevationAt(nextPos);
+        if (std::abs(m_prevPathPoint.toScreen().angleTo(nextPos.toScreen())) > 0.1) {
+            unit->setAngle(m_prevPathPoint.toScreen().angleTo(nextPos.toScreen()));
+        }
+    }
     newPos.z = m_map->elevationAt(newPos);
 
     if (!isPassable(newPos.x, newPos.y)) {
@@ -538,13 +573,19 @@ IAction::UpdateResult ActionMove::update(Time time) noexcept
     return UpdateResult::Updated;
 }
 
-std::shared_ptr<ActionMove> ActionMove::moveUnitTo(const UnitPtr &unit, const UnitPtr &targetUnit, const Task &task) noexcept
+std::shared_ptr<ActionMove> ActionMove::moveUnitTo(const UnitPtr &unit, const Task &task) noexcept
 {
     if (!unit->data()->Speed) {
         DBG << "Handed unit that can't move" << unit->debugName;
         return nullptr;
     }
 
+
+    Unit::Ptr targetUnit = task.target.lock();
+    if (!targetUnit) {
+        WARN << "Asked to move to unit, but no unit passed";
+        return nullptr;
+    }
 
     std::shared_ptr<ActionMove> action (new ActionMove(targetUnit->position(), unit, task));
     action->m_targetUnit = targetUnit;
@@ -561,6 +602,7 @@ std::shared_ptr<ActionMove> ActionMove::moveUnitTo(const Unit::Ptr &unit, MapPos
 
 
     std::shared_ptr<ActionMove> action (new ActionMove(destination, unit, task));
+    action->m_targetUnit = task.target;
 
     return action;
 }
@@ -571,6 +613,17 @@ std::shared_ptr<ActionMove> ActionMove::moveUnitTo(const Unit::Ptr &unit, MapPos
     defaultGenieMoveTask.ActionType = genie::ActionType::MoveTo;
 
     return moveUnitTo(unit, destination, Task(defaultGenieMoveTask, -1));
+}
+
+std::shared_ptr<ActionMove> ActionMove::moveUnitTo(const Unit::Ptr &unit, const Unit::Ptr &targetUnit) noexcept
+{
+    static genie::Task defaultGenieMoveTask;
+    defaultGenieMoveTask.ActionType = genie::ActionType::MoveTo;
+
+    Task moveTask(defaultGenieMoveTask, -1);
+    moveTask.target = targetUnit;
+
+    return moveUnitTo(unit, moveTask);
 }
 
 #if 0
@@ -841,8 +894,8 @@ bool ActionMove::isPassable(const float x, const float y) noexcept
     if (IS_UNLIKELY(x < 0 || y < 0)) {
         return false;
     }
-    const int tileX = x / Constants::TILE_SIZE + 0.5;
-    const int tileY = y / Constants::TILE_SIZE + 0.5;
+    const int tileX = x / Constants::TILE_SIZE;
+    const int tileY = y / Constants::TILE_SIZE;
     if (IS_UNLIKELY(tileX >= m_map->columnCount() || tileY >= m_map->rowCount())) {
         return false;
     }

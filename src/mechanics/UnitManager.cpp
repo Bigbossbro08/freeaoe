@@ -75,7 +75,7 @@ void UnitManager::add(const Unit::Ptr &unit, const MapPos &position)
     unit->setMap(m_map);
     unit->setPosition(position, true);
     m_units.push_back(unit);
-    if (unit->hasAutoTargets()) {
+    if (unit->actions.hasAutoTargets()) {
         m_unitsWithActions.insert(unit);
     }
 
@@ -116,7 +116,11 @@ bool UnitManager::update(Time time)
         m_unitsMoved = false;
 
         for (const Unit::Ptr &unit : m_unitsWithActions) {
-            unit->checkForAutoTargets();
+            Task task = unit->actions.checkForAutoTargets();
+            if (!task.data) {
+                continue;
+            }
+            IAction::assignTask(task, unit);
         }
     }
 
@@ -393,7 +397,7 @@ void UnitManager::render(const std::shared_ptr<SfmlRenderTarget> &renderTarget, 
 
 
 #if defined(DEBUG)
-        ActionPtr action = unit->currentAction();
+        ActionPtr action = unit->actions.currentAction();
         if (action && action->type == IAction::Type::Move) {
             std::shared_ptr<ActionMove> moveAction = std::static_pointer_cast<ActionMove>(action);
 
@@ -533,11 +537,14 @@ bool UnitManager::onLeftClick(const ScreenPos &screenPos, const CameraPtr &camer
 
             std::shared_ptr<ActionAttack> action;
             if (targetUnit) {
-                action = std::make_shared<ActionAttack>(unit, targetUnit, unit->findMatchingTask(genie::ActionType::Attack, targetUnit->data()->ID));
+                Task task = unit->actions.findAnyTask(genie::ActionType::Attack, targetUnit->data()->ID);
+                task.target = targetUnit;
+                action = std::make_shared<ActionAttack>(unit, task);
             } else {
-                action = std::make_shared<ActionAttack>(unit, targetPos, unit->findMatchingTask(genie::ActionType::Attack, -1));
+                DBG << "Attacking ground";
+                action = std::make_shared<ActionAttack>(unit, targetPos, unit->actions.findAnyTask(genie::ActionType::Attack, -1));
             }
-            unit->setCurrentAction(action);
+            unit->actions.setCurrentAction(action);
         }
         break;
     }
@@ -580,9 +587,10 @@ void UnitManager::onRightClick(const ScreenPos &screenPos, const CameraPtr &came
             AudioPlayer::instance().playSound(unit->data()->Action.AttackSound, humanPlayer->civilization.id());
         }
 
-        unit->clearActionQueue();
+        unit->actions.clearActionQueue();
         Unit::Ptr target = unitAt(screenPos, camera);
-        IAction::assignTask(task, unit, target);
+        task.target = target;
+        IAction::assignTask(task, unit);
         if (target) {
             target->targetBlinkTimeLeft = 3000; // 3s
         }
@@ -601,7 +609,7 @@ void UnitManager::onRightClick(const ScreenPos &screenPos, const CameraPtr &came
             continue;
         }
 
-        unit->clearActionQueue();
+        unit->actions.clearActionQueue();
         moveUnitTo(unit, mapPos);
         movedSomeone = true;
 
@@ -828,7 +836,7 @@ void UnitManager::setSelectedUnits(const UnitSet &units)
     }
 
     for (const Unit::Ptr &unit : m_selectedUnits) {
-        m_currentActions.merge(unit->availableActions());
+        m_currentActions.merge(unit->actions.availableActions());
     }
 
     // Not sure what is the actual correct behavior here:
@@ -962,12 +970,12 @@ const Task UnitManager::defaultActionAt(const ScreenPos &pos, const CameraPtr &c
         return Task();
     }
 
-    return IAction::findMatchingTask(m_humanPlayer.lock(), target, m_currentActions);
+    return UnitActionHandler::findMatchingTask(m_humanPlayer.lock(), target, m_currentActions);
 }
 
 void UnitManager::moveUnitTo(const Unit::Ptr &unit, const MapPos &targetPos)
 {
-    unit->setCurrentAction(ActionMove::moveUnitTo(unit, targetPos));
+    unit->actions.setCurrentAction(ActionMove::moveUnitTo(unit, targetPos));
 }
 
 void UnitManager::selectAttackTarget()
@@ -1010,7 +1018,7 @@ void UnitManager::placeBuilding(const UnplacedBuilding &building)
         }
 
         Task task;
-        for (const Task &potential : unit->availableActions()) {
+        for (const Task &potential : unit->actions.availableActions()) {
             if (potential.data->ActionType == genie::ActionType::Build) {
                 task = potential;
                 break;
@@ -1022,7 +1030,8 @@ void UnitManager::placeBuilding(const UnplacedBuilding &building)
 
         // TODO: should clear this elsewhere, otherwise it just gets queued up
 //        unit->clearActionQueue();
-        IAction::assignTask(task, unit, buildingToPlace);
+        task.target = buildingToPlace;
+        IAction::assignTask(task, unit);
     }
 }
 
@@ -1058,5 +1067,5 @@ const Task UnitManager::taskForPosition(const Unit::Ptr &unit, const ScreenPos &
         return Task();
     }
 
-    return IAction::findMatchingTask(m_humanPlayer.lock(), target, unit->availableActions());
+    return unit->actions.findTaskWithTarget(target);
 }

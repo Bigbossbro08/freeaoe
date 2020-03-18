@@ -24,11 +24,16 @@ class AttackOrArmor;
 }  // namespace unit
 }  // namespace genie
 
-ActionAttack::ActionAttack(const Unit::Ptr &attacker, const Unit::Ptr &target, const Task &task) :
+ActionAttack::ActionAttack(const Unit::Ptr &attacker, const Task &task) :
     IAction(IAction::Type::Attack, attacker, task),
-    m_targetPosition(target->position()),
-    m_targetUnit(target)
+    m_targetUnit(task.target)
 {
+    Unit::Ptr target = task.target.lock();
+    if (!target) {
+        WARN << "target gone";
+        return;
+    }
+    m_targetPosition = target->position();
     if (target->playerId == attacker->playerId) {
         m_targetUnit.reset();
     }
@@ -79,9 +84,10 @@ IAction::UpdateResult ActionAttack::update(Time time)
             return IAction::UpdateResult::Failed;
         }
 
-        std::shared_ptr<ActionMove> moveAction = ActionMove::moveUnitTo(unit, targetUnit, m_task);
+        std::shared_ptr<ActionMove> moveAction = ActionMove::moveUnitTo(unit, targetUnit);
+
         moveAction->maxDistance = unit->data()->Combat.MaxRange * Constants::TILE_SIZE;
-        unit->prependAction(moveAction);
+        unit->actions.prependAction(moveAction);
 
         return IAction::UpdateResult::NotUpdated;
     }
@@ -93,7 +99,7 @@ IAction::UpdateResult ActionAttack::update(Time time)
             return IAction::UpdateResult::Failed;
         }
 
-        if (!unit->findMatchingTask(genie::ActionType::RetreatToShootingRage, -1).data) {
+        if (!unit->actions.findAnyTask(genie::ActionType::RetreatToShootingRage, -1).data) {
             return IAction::UpdateResult::Failed;
         }
 
@@ -103,7 +109,7 @@ IAction::UpdateResult ActionAttack::update(Time time)
         float targetY = m_targetPosition.y + sin(angleToTarget + M_PI) * minDistance;
 
         std::shared_ptr<ActionMove> moveAction = ActionMove::moveUnitTo(unit, MapPos(targetX, targetY), m_task);
-        unit->prependAction(moveAction);
+        unit->actions.prependAction(moveAction);
         return IAction::UpdateResult::NotUpdated;
     }
 

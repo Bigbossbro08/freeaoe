@@ -140,14 +140,6 @@ int main(int argc, char **argv) try
                     return 1;
                 }
                 history.display();
-<<<<<<< HEAD
-            }
-			else if (button == HomeScreen::Button::MapEditor)
-			{
-			}
-			else if (button == HomeScreen::Button::Tutorial) 
-			{
-=======
             } else if (button == HomeScreen::Button::MapEditor) {
                 Editor editor;
                 if (editor.init()) {
@@ -156,7 +148,6 @@ int main(int argc, char **argv) try
                     WARN << "Failed to load editor";
                 }
             } else if (button == HomeScreen::Button::Tutorial) {
->>>>>>> 282bec2e964f9f3610635d4226846aadd4789adf
                 startGame = true;
                 try 
 				{
@@ -233,9 +224,7 @@ int main(int argc, char **argv) try
     en.start();
 
     return 0;
-} 
-catch (const std::exception &e) 
-{
-    std::cerr << "uncatched exception " << e.what() << std::endl;
+} catch (const std::exception &e) {
+    std::cerr << "uncatched exception '" << e.what() << "', terminating uncleanly" << std::endl;
     return 1;
 }

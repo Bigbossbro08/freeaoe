@@ -291,9 +291,19 @@ void Config::setAllowedOptions(const std::vector<Config::ConfigOption> &options)
 }
 
 
-const std::string &Config::getValue(const std::string &name)
+std::string Config::getValue(const std::string &name)
 {
+<<<<<<< HEAD
 	return m_options[name];
+=======
+    // TODO separate getters, it's a bit dumb with all this generic shit for basically just one
+    if (name == "game-path") {
+        std::filesystem::path path(m_options[name]);
+        return path.generic_string();
+    }
+
+    return m_options[name];
+>>>>>>> c48b8fa6feb02a140068c44b66914eef2d5016d7
 }
 
 void Config::setValue(const std::string &name, const std::string &value)
@@ -335,8 +345,8 @@ Config::Config(const std::string &applicationName)
 	m_filePath += "/";
 	m_f
 #elif defined(WIN32) || defined(__WIN32) || defined(__WIN32__)
-	m_filePath = std::filesystem::current_path().string();
-	m_filePath += "/";
+    m_filePath = std::filesystem::current_path().string();
+    m_filePath += "/";
 #endif
 	m_filePath += applicationName + ".cfg";
 }

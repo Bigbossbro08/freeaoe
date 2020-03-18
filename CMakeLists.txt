@@ -6,6 +6,8 @@ else()
 endif()
 
 set (CMAKE_CXX_STANDARD 20)
+set(CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(freeaoe)
 
@@ -59,6 +61,13 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
         set(DO_CLANG_TIDY "${CLANG_TIDY_EXE}")
     endif()
 endif()
+
+find_program(BUILDCACHE_PROGRAM buildcache)
+if(BUILDCACHE_PROGRAM)
+    message(STATUS "Using buildcache: ${BUILDCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${BUILDCACHE_PROGRAM}")
+endif()
+
 
 option(ENABLE_SANITIZERS "Enable runtime sanitizing (for development)")
 if (ENABLE_SANITIZERS)
@@ -179,6 +188,7 @@ set(MECHANICS_SRC
     src/mechanics/Map.cpp
     src/mechanics/Player.cpp
     src/mechanics/StateManager.cpp
+    src/mechanics/UnitActionHandler.cpp
     src/mechanics/UnitFactory.cpp
     src/mechanics/UnitManager.cpp
     src/mechanics/Unit.cpp

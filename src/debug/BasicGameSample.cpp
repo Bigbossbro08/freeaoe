@@ -123,8 +123,8 @@ void BasicGameSample::addHumanUnits()
 
 void BasicGameSample::addEnemyUnits()
 {
-    Unit::Ptr unit = UnitFactory::Inst().createUnit(74, m_enemyPlayer, *unitManager_);
-    unitManager_->add(unit, MapPos(48*8, 48*8, 0));
+//    Unit::Ptr unit = UnitFactory::Inst().createUnit(74, m_enemyPlayer, *unitManager_);
+//    unitManager_->add(unit, MapPos(48*8, 48*8, 0));
 }
 
 void BasicGameSample::addGaia()
